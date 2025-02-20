@@ -1,24 +1,21 @@
-defmodule RabbitmqPoolEx.PoolSupervisor do
+defmodule RabbitMQPoolEx.PoolSupervisor do
   use Supervisor
 
-  @type pool_boy_config :: {
+  @type poolboy_config :: {
           {scope :: :global | :local | :via, name :: atom()},
           worker_module: module(),
           size: non_neg_integer(),
           max_overflow: non_neg_integer(),
           strategy: :lifo | :fifo
         }
-  @type config :: [rabbitmq_config: keyword(), connection_pools: [pool_boy_config()]]
+
+  @type config :: [rabbitmq_config: keyword(), connection_pools: [poolboy_config()]]
 
   @spec start_link(config()) :: Supervisor.on_start()
-  def start_link(config) do
-    Supervisor.start_link(__MODULE__, config)
-  end
+  def start_link(config), do: Supervisor.start_link(__MODULE__, config)
 
   @spec start_link(config(), atom()) :: Supervisor.on_start()
-  def start_link(config, name) do
-    Supervisor.start_link(__MODULE__, config, name: name)
-  end
+  def start_link(config, name), do: Supervisor.start_link(__MODULE__, config, name: name)
 
   @impl true
   def init(config) do
