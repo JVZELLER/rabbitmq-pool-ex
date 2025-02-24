@@ -53,8 +53,8 @@ defmodule RabbitMQPoolEx.Ports.RabbitMQ do
   This design allows for easy mocking and testing by providing alternative implementations as needed.
   """
 
-  alias AMQP.Connection
   alias AMQP.Channel
+  alias AMQP.Connection
 
   @callback open_connection(keyword() | String.t()) ::
               {:ok, Connection.t()} | {:error, atom()} | {:error, any()}

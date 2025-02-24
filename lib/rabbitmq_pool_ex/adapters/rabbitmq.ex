@@ -6,8 +6,8 @@ defmodule RabbitMQPoolEx.Adapters.RabbitMQ do
   that delegate directly to the `AMQP.Connection` and `AMQP.Channel` modules.
   """
 
-  alias AMQP.Connection
   alias AMQP.Channel
+  alias AMQP.Connection
 
   @behaviour RabbitMQPoolEx.Ports.RabbitMQ
 
