@@ -36,6 +36,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
 
     @enforce_keys [:config]
     @type t :: %__MODULE__{
+            adapter: module(),
             connection: AMQP.Connection.t(),
             channels: list(AMQP.Channel.t()),
             monitors: %{},
@@ -43,7 +44,8 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
             reuse_channels: boolean()
           }
 
-    defstruct connection: nil,
+    defstruct adapter: RabbitMQPoolEx.Adapters.RabbitMQ,
+              connection: nil,
               channels: [],
               config: nil,
               monitors: %{},
@@ -203,8 +205,8 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   end
 
   @impl true
-  def handle_call(:create_channel, _from, %{connection: conn} = state) do
-    result = start_channel(conn)
+  def handle_call(:create_channel, _from, %{connection: conn, adapter: adapter} = state) do
+    result = start_channel(conn, adapter)
 
     {:reply, result, state}
   end
@@ -266,7 +268,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   @impl true
   def handle_info(
         {:EXIT, pid, reason},
-        %{channels: channels, connection: conn, monitors: monitors} = state
+        %{channels: channels, connection: conn, monitors: monitors, adapter: adapter} = state
       ) do
     Logger.warning("[RabbitMQPoolEx] Channel lost due to reason: #{inspect(reason)}")
     # don't start a new channel if crashed channel doesn't belongs to the pool
@@ -277,7 +279,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
       new_channels = remove_channel(channels, pid)
       new_monitors = remove_monitor(monitors, pid)
 
-      case start_channel(conn) do
+      case start_channel(conn, adapter) do
         {:ok, channel} ->
           true = Process.link(channel.pid)
           {:noreply, %State{state | channels: [channel | new_channels], monitors: new_monitors}}
@@ -295,7 +297,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   @impl true
   def handle_info(
         {:DOWN, down_ref, :process, _process_pid, _reason},
-        %{channels: channels, monitors: monitors, connection: conn} = state
+        %{channels: channels, monitors: monitors, connection: conn, adapter: adapter} = state
       ) do
     monitors
     |> find_monitor(down_ref)
@@ -307,7 +309,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
         new_monitors = remove_monitor(monitors, pid)
         true = Process.unlink(pid)
 
-        case start_channel(conn) do
+        case start_channel(conn, adapter) do
           {:ok, channel} ->
             true = Process.link(channel.pid)
 
@@ -321,9 +323,9 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   end
 
   @impl true
-  def terminate(_reason, %{connection: connection} = _state) do
+  def terminate(_reason, %{connection: connection, adapter: adapter} = _state) do
     if connection && Process.alive?(connection.pid) do
-      AMQP.Connection.close(connection)
+      adapter.close_connection(connection)
     end
   end
 
@@ -349,9 +351,9 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   #   - An error log is generated, detailing the failure reason.
   #   - The function schedules a retry to establish the connection (using the `schedule_connect/1` function).
   #   - The original `state` is returned unchanged.
-  defp connect(%State{config: amqp_config} = state) do
+  defp connect(%State{config: amqp_config, adapter: adapter} = state) do
     amqp_config
-    |> AMQP.Connection.open()
+    |> adapter.open_connection()
     |> case do
       {:ok, %{pid: conn_pid} = connection} ->
         Logger.info("[RabbitMQPoolEx] Successfully opened connection")
@@ -385,15 +387,17 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   # - The function retrieves the desired number of channels from the configuration (`:channels`), defaulting to `
   #   @default_channels` if not specified.
   # - It then creates the specified number of channels by:
-  #   - Starting each channel with the `start_channel/1` function.
+  #   - Starting each channel with the `start_channel/2` function.
   #   - Linking the current process to each created channel to handle errors (using `Process.link/1`).
   # - Then, the function returns the updated `state` with the newly created channels added to the `channels` list.
-  defp create_channels(%State{config: amqp_config, connection: connection} = state) do
+  defp create_channels(
+         %State{config: amqp_config, connection: connection, adapter: adapter} = state
+       ) do
     num_channels = Keyword.get(amqp_config, :channels, @default_channels)
 
     channels =
       Enum.map(num_channels, fn _n ->
-        {:ok, channel} = start_channel(connection)
+        {:ok, channel} = start_channel(connection, adapter)
 
         # Link itself to the channel to handle errors
         true = Process.link(channel.pid)
@@ -425,7 +429,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
     end
   end
 
-  defp checkin_chanel(%State{connection: conn} = state, %{pid: pid} = channel) do
+  defp checkin_chanel(%State{connection: conn, adapter: adapter} = state, %{pid: pid} = channel) do
     %{channels: channels, monitors: monitors} = state
 
     # Only start a new channel when checkin back a channel that isn't removed yet
@@ -436,7 +440,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
       new_channels = remove_channel(channels, pid)
       new_monitors = remove_monitor(monitors, pid)
 
-      case replace_channel(channel, conn) do
+      case replace_channel(channel, conn, adapter) do
         {:ok, channel} ->
           %State{state | channels: [channel | new_channels], monitors: new_monitors}
 
@@ -457,6 +461,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   # TODO:
   #   * use exponential backoff to reconnect
   #   * use circuit breaker to fail fast
+  #
   # ## Parameters
   #   - `config` - Configuration options (keyword list or string).
   defp schedule_connect(config) do
@@ -476,10 +481,10 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   #
   # ## Parameters
   #   - `connection` - The active RabbitMQ connection (`AMQP.Connection.t()`).
-  @spec start_channel(AMQP.Connection.t()) :: {:ok, AMQP.Channel.t()} | {:error, any()}
-  defp start_channel(%AMQP.Connection{pid: conn_pid} = connection) do
+  @spec start_channel(AMQP.Connection.t(), module()) :: {:ok, AMQP.Channel.t()} | {:error, any()}
+  defp start_channel(%AMQP.Connection{pid: conn_pid} = connection, adapter) do
     if Process.alive?(conn_pid) do
-      case AMQP.Channel.open(connection) do
+      case adapter().open_channel(connection) do
         {:ok, _channel} = result ->
           Logger.debug("[RabbitMQPoolEx] channel connected")
           result
@@ -536,12 +541,12 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
     Enum.find(channels, &(&1.pid == channel_pid)) || Map.get(monitors, channel_pid)
   end
 
-  defp replace_channel(%AMQP.Channel{pid: pid} = channel, conn) do
+  defp replace_channel(%AMQP.Channel{pid: pid} = channel, conn, adapter) do
     true = Process.unlink(pid)
 
-    AMQP.Channel.close(channel)
+    adapter.close_channel(channel)
 
-    case start_channel(conn) do
+    case start_channel(conn, adapter) do
       {:ok, channel} = result ->
         true = Process.link(channel.pid)
 
