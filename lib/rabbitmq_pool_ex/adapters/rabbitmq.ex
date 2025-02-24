@@ -13,9 +13,9 @@ defmodule RabbitMQPoolEx.Adapters.RabbitMQ do
 
   defdelegate open_connection(config), to: Connection, as: :open
 
-  defdelegate close_connection(config), to: Connection, as: :close
+  defdelegate close_connection(conn), to: Connection, as: :close
 
-  defdelegate open_channel, to: Channel, as: :open
+  defdelegate open_channel(conn), to: Channel, as: :open
 
-  defdelegate close_channel, to: Channel, as: :close
+  defdelegate close_channel(channel), to: Channel, as: :close
 end

@@ -8,11 +8,13 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
 
   ## Configuration Options
 
-    * `:reuse_channels` - When set to `true`, channels are reused when checked back into the pool. Defaults to `false`.
+    * `:reuse_channels?` - When set to `true`, channels are reused when checked back into the pool. Defaults to `false`.
     * `:channels` - Number of channels to create in the pool. Defaults to 10.
     * `:reconnect_interval` - Interval in milliseconds to wait before attempting to reconnect. Defaults to 1000ms.
   """
   use GenServer
+
+  alias RabbitMQPoolEx.Adapters.RabbitMQ
 
   require Logger
 
@@ -29,7 +31,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
       * `:channels` - List of channels available in the pool.
       * `:monitors` - Map of monitored processes holding channels.
       * `:config` - Configuration options provided when starting the worker.
-      * `:reuse_channels` - Boolean indicating if channels are reused.
+      * `:reuse_channels?` - Boolean indicating if channels are reused.
     """
 
     @type config :: keyword() | String.t()
@@ -41,15 +43,15 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
             channels: list(AMQP.Channel.t()),
             monitors: %{},
             config: config(),
-            reuse_channels: boolean()
+            reuse_channels?: boolean()
           }
 
-    defstruct adapter: RabbitMQPoolEx.Adapters.RabbitMQ,
+    defstruct adapter: RabbitMQ,
               connection: nil,
               channels: [],
               config: nil,
               monitors: %{},
-              reuse_channels: false
+              reuse_channels?: false
   end
 
   ##############
@@ -109,18 +111,18 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   It takes care of reintegrating the channel into the state,
   ensuring the channel is properly monitored, and that the connection status is properly managed.
 
-  The function behaves differently based on whether the channel reuse feature is enabled (`reuse_channels: true`) in the worker state.
+  The function behaves differently based on whether the channel reuse feature is enabled (`reuse_channels?: true`) in the worker state.
 
   ## Parameters:
     - `pid` - The PID of the worker process.
     - `channel` - The channel to check back in.
 
   ## Behavior:
-  - When `reuse_channels: true`:
+  - When `reuse_channels?: true`:
     - If the channel's `pid` already exists in the pool (i.e., in the list of channels), it will simply remove the monitor for that `pid` and return the updated state.
     - If the `pid` is not already in the pool, it will add the channel to the list of channels and remove the monitor for that `pid` and return the updated state
 
-  - When `reuse_channels` is not enabled:
+  - When `reuse_channels?` is not enabled:
     - If the channel's `pid` is found in either the list of channels or monitors, it will attempt to remove the channel from the pool and handle potential errors in case the channel has been closed.
     - If the channel's connection is still valid, it will replace the channel with a new one (close the current channel and open a new one).
     - If the connection is closed (`{:error, :closing}`), the state will simply be updated without re-adding the channel.
@@ -163,14 +165,17 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   - `amqp_config` (keyword or string): RabbitMQ configuration settings used to establish the connection.
   """
   @impl true
-  def init(amqp_config) do
+  def init(config) do
     Process.flag(:trap_exit, true)
 
-    reuse_channels = Keyword.get(amqp_config, :reuse_channels, false)
+    {internal_opts, amqp_config} = Keyword.split(config, [:adapter])
+
+    adapter = Keyword.get(internal_opts, :adapter, RabbitMQ)
+    reuse_channels? = Keyword.get(amqp_config, :reuse_channels?, false)
 
     send(self(), :connect)
 
-    {:ok, %State{config: amqp_config, reuse_channels: reuse_channels}}
+    {:ok, %State{config: amqp_config, reuse_channels?: reuse_channels?, adapter: adapter}}
   end
 
   @impl true
@@ -225,12 +230,13 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
 
   @impl true
   def handle_info(:connect, %State{} = state) do
-    new_state =
-      state
-      |> connect()
-      |> create_channels()
-
-    {:noreply, new_state}
+    state
+    |> connect()
+    |> case do
+      %{connection: nil} = state -> state
+      state -> create_channels(state)
+    end
+    |> then(&{:noreply, &1})
   end
 
   # Connection crashed/closed
@@ -396,7 +402,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
     num_channels = Keyword.get(amqp_config, :channels, @default_channels)
 
     channels =
-      Enum.map(num_channels, fn _n ->
+      Enum.map(1..num_channels, fn _n ->
         {:ok, channel} = start_channel(connection, adapter)
 
         # Link itself to the channel to handle errors
@@ -417,7 +423,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
     {channel, %State{state | channels: rest, monitors: new_monitors}}
   end
 
-  defp checkin_chanel(%State{reuse_channels: true} = state, %{pid: pid} = channel) do
+  defp checkin_chanel(%State{reuse_channels?: true} = state, %{pid: pid} = channel) do
     %{channels: channels, monitors: monitors} = state
 
     new_monitors = remove_monitor(monitors, pid)
@@ -484,7 +490,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   @spec start_channel(AMQP.Connection.t(), module()) :: {:ok, AMQP.Channel.t()} | {:error, any()}
   defp start_channel(%AMQP.Connection{pid: conn_pid} = connection, adapter) do
     if Process.alive?(conn_pid) do
-      case adapter().open_channel(connection) do
+      case adapter.open_channel(connection) do
         {:ok, _channel} = result ->
           Logger.debug("[RabbitMQPoolEx] channel connected")
           result
