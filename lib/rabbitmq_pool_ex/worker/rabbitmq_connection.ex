@@ -305,9 +305,12 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
 
       {pid, _ref} ->
         new_monitors = remove_monitor(monitors, pid)
+        true = Process.unlink(pid)
 
-        case replace_channel(pid, conn) do
+        case start_channel(conn) do
           {:ok, channel} ->
+            true = Process.link(channel.pid)
+
             {:noreply, %State{state | channels: [channel | channels], monitors: new_monitors}}
 
           {:error, :closing} ->
@@ -533,13 +536,6 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
     Enum.find(channels, &(&1.pid == channel_pid)) || Map.get(monitors, channel_pid)
   end
 
-  defp replace_channel(channel, _conn) when is_pid(channel) do
-    case :amqp_channel.close(channel) do
-      :ok -> :ok
-      error -> {:error, error}
-    end
-  end
-
   defp replace_channel(%AMQP.Channel{pid: pid} = channel, conn) do
     true = Process.unlink(pid)
 
@@ -548,6 +544,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
     case start_channel(conn) do
       {:ok, channel} = result ->
         true = Process.link(channel.pid)
+
         result
 
       {:error, _reason} = error ->
