@@ -1,0 +1,13 @@
+services:
+
+  rabbitmq:
+    image: rabbitmq:4.0.6-management-alpine
+    ports:
+      - 15672:15672
+      - 5672:5672
+    networks:
+      - rabbitmq
+
+networks:
+  rabbitmq:
+    driver: bridge

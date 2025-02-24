@@ -188,7 +188,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
     if Process.alive?(connection.pid) do
       {:reply, {:ok, connection}, state}
     else
-      {:reply, {:ok, :disconnected}, state}
+      {:reply, {:error, :disconnected}, state}
     end
   end
 

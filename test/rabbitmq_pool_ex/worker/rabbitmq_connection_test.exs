@@ -1,14 +1,10 @@
 defmodule RabbitMQPoolEx.Worker.RabbitMQConnectionTest do
   use ExUnit.Case, async: true
 
-  alias RabbitMQPoolEx.Adapters.FakeRabbitMQ
   alias RabbitMQPoolEx.Worker.RabbitMQConnection, as: ConnWorker
 
   setup do
-    rabbitmq_config = [
-      channels: 1,
-      adapter: FakeRabbitMQ
-    ]
+    rabbitmq_config = [channels: 1]
 
     {:ok, config: rabbitmq_config}
   end
@@ -35,9 +31,9 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnectionTest do
     test "should reset state and schedule reconnect when connection is lost", %{config: config} do
       pid = start_supervised!({ConnWorker, config})
 
-      %{channels: [_], connection: %{pid: conn_pid}} = ConnWorker.state(pid)
+      %{channels: [_], connection: conn} = ConnWorker.state(pid)
 
-      assert true = Process.exit(conn_pid, :kill)
+      assert :ok == AMQP.Connection.close(conn)
 
       assert %{channels: [], connection: nil} = ConnWorker.state(pid)
     end
@@ -92,16 +88,35 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnectionTest do
       assert Enum.empty?(monitors)
     end
 
-    test "returns error when disconnected", %{config: config} do
-      test_pid = self()
-      config = Keyword.put(config, :reply_error, test_pid)
-
+    test "creates a new channel when it closes", %{config: config} do
       pid = start_supervised!({ConnWorker, config})
+
+      %{channels: [%{pid: channel_pid} = channel]} = ConnWorker.state(pid)
+
+      ref = Process.monitor(channel_pid)
+
+      assert {:ok, channel} == ConnWorker.checkout_channel(pid)
+
+      assert :ok == AMQP.Channel.close(channel)
+
+      assert_receive {:DOWN, ^ref, :process, ^channel_pid, :normal}
+
+      assert %{channels: [new_channel], monitors: monitors} = ConnWorker.state(pid)
+
+      assert channel != new_channel
+
+      assert Enum.empty?(monitors)
+    end
+
+    test "returns error when disconnected", %{config: config} do
+      pid = start_supervised!({ConnWorker, config})
+
+      %{channels: [_], connection: conn} = ConnWorker.state(pid)
+
+      assert :ok == AMQP.Connection.close(conn)
 
       assert {:error, :disconnected} = ConnWorker.get_connection(pid)
       assert {:error, :disconnected} = ConnWorker.checkout_channel(pid)
-
-      assert_received {:error, {:connection, :invalid}}
     end
   end
 
@@ -138,23 +153,23 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnectionTest do
 
       assert {:ok, channel} = ConnWorker.checkout_channel(pid)
 
-      assert %{channels: [], connection: %{pid: conn_pid}} = ConnWorker.state(pid)
+      assert %{channels: [], connection: conn} = ConnWorker.state(pid)
 
-      assert true == Process.exit(conn_pid, :kill)
+      assert :ok == AMQP.Connection.close(conn)
 
       assert :ok == ConnWorker.checkin_channel(pid, channel)
 
       assert %{channels: []} = ConnWorker.state(pid)
     end
 
-    test "should do not add crashed channel back to channel pool", %{config: config} do
+    test "should not add crashed channel back to channel pool", %{config: config} do
       pid = start_supervised!({ConnWorker, config})
 
       assert {:ok, %{pid: channel_pid} = channel} = ConnWorker.checkout_channel(pid)
 
       assert %{channels: []} = ConnWorker.state(pid)
 
-      assert true == Process.exit(channel_pid, :kill)
+      assert true == Process.exit(channel_pid, :normal)
 
       assert :ok == ConnWorker.checkin_channel(pid, channel)
 
