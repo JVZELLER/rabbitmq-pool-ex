@@ -1,10 +1,13 @@
 defmodule RabbitMQPoolEx.MixProject do
   use Mix.Project
 
+  @name "RabbitMQ Pool Ex"
+  @source_url "https://github.com/JVZELLER/rabbitmq-pool-ex"
+
   def project do
     [
       app: :rabbitmq_pool_ex,
-      version: "1.0.0-alpha.1",
+      version: version(),
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -16,7 +19,29 @@ defmodule RabbitMQPoolEx.MixProject do
         # even though the opt is marked as deprecated, this is the doc-recommended way
         # to do this
         plt_file: {:no_warn, "priv/plts/dialyzer.plt"}
-      ]
+      ],
+      # Hex
+      description:
+        "A lightweight Elixir library for managing RabbitMQ connection and channel pools.",
+      package: package(),
+
+      # Docs
+      name: @name
+    ]
+  end
+
+  defp version do
+    "VERSION"
+    |> File.read!()
+    |> String.trim()
+  end
+
+  defp package do
+    [
+      maintainers: ["José Victor Zeller"],
+      files: ~w(lib .formatter.exs mix.exs README* VERSION CHANGELOG*),
+      licenses: ["Apache-2.0"],
+      links: %{"GitHub" => @source_url}
     ]
   end
 
