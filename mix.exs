@@ -4,7 +4,7 @@ defmodule RabbitMQPoolEx.MixProject do
   def project do
     [
       app: :rabbitmq_pool_ex,
-      version: "0.1.0",
+      version: "1.0.0-alpha.1",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -15,7 +15,7 @@ defmodule RabbitMQPoolEx.MixProject do
         # we use the following opt to change the PLT path
         # even though the opt is marked as deprecated, this is the doc-recommended way
         # to do this
-        plt_file: {:no_warn, "_dialyzer/dialyzer.plt"}
+        plt_file: {:no_warn, "priv/plts/dialyzer.plt"}
       ]
     ]
   end

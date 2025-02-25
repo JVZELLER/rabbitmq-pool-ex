@@ -31,9 +31,13 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnectionTest do
     test "should reset state and schedule reconnect when connection is lost", %{config: config} do
       pid = start_supervised!({ConnWorker, config})
 
-      %{channels: [_], connection: conn} = ConnWorker.state(pid)
+      %{channels: [_], connection: %{pid: conn_pid} = conn} = ConnWorker.state(pid)
+
+      ref = Process.monitor(conn_pid)
 
       assert :ok == AMQP.Connection.close(conn)
+
+      assert_receive {:DOWN, ^ref, :process, ^conn_pid, {:shutdown, :normal}}
 
       assert %{channels: [], connection: nil} = ConnWorker.state(pid)
     end

@@ -1,0 +1,134 @@
+name: Code Quality
+
+on:
+  push:
+  pull_request:
+    paths:
+      - "**.exs"
+      - "**.ex"
+      - "mix.lock"
+      - ".tool-versions"
+      - ".github/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+  cancel-in-progress: true
+
+env:
+  MIX_ENV: test
+  LANG: C.UTF-8
+
+jobs:
+  build:
+    name: Install and Compile Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install compile dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y build-essential git
+
+      - name: Restore cache
+        uses: actions/cache@v3
+        id: mix-cache
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}-${{ hashFiles('.tool-versions') }}
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Clean dependencies
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: mix deps.clean --all
+
+      - name: Install dependencies
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+
+      - name: Compile dependencies
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: mix deps.compile
+
+  static_code_analysis:
+    name: Static Code Analysis
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore dependencies cache
+        uses: actions/cache@v3
+        id: mix-cache
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}-${{ hashFiles('.tool-versions') }}
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Run Lint and Credo
+        run: |
+          mix deps.unlock --check-unused
+          mix format --check-formatted
+          mix credo --strict
+
+      - name: Restore Dialyzer Cache
+        uses: actions/cache@v3
+        id: mix-cache-dialyzer
+        with:
+          path: |
+            priv/plts
+          key: ${{ runner.os }}-v1-plt-cache-${{ hashFiles('**/mix.lock') }}-${{ hashFiles('.tool-versions') }}
+
+      - name: Run Dialyzer
+        run: mix dialyzer --format github
+
+  test:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      rabbitmq:
+        image: rabbitmq:4.0.6-management-alpine
+        ports:
+          - 5672:5672
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore dependencies cache
+        uses: actions/cache@v3
+        id: mix-cache
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}-${{ hashFiles('.tool-versions') }}
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Run Unit Tests
+        run: mix test --warnings-as-errors

@@ -24,3 +24,6 @@ rabbitmq_pool_ex-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# Ignore Dialyzer PLTs
+/priv/plts/
