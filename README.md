@@ -1,6 +1,6 @@
 # RabbitMQPoolEx
 
-[![Build Status](https://github.com/jvzeller/rabbitmq-pool-ex/actions/workflows/ci.yml/badge.svg)](https://github.com/jvzeller/rabbitmq-pool-ex/actions) [![Hex.pm](https://img.shields.io/hexpm/v/rabbitmq-pool-ex.svg)](https://hex.pm/packages/rabbitmq-pool-ex) [![Documentation](https://img.shields.io/badge/documentation-gray)](https://hexdocs.pm/rabbitmq-pool-ex/)
+[![Build Status](https://github.com/jvzeller/rabbitmq-pool-ex/actions/workflows/ci.yml/badge.svg)](https://github.com/jvzeller/rabbitmq-pool-ex/actions) [![Hex.pm](https://img.shields.io/hexpm/v/rabbitmq_pool_ex.svg)](https://hex.pm/packages/rabbitmq_pool_ex) [![Documentation](https://img.shields.io/badge/documentation-gray)](https://hexdocs.pm/rabbitmq_pool_ex/)
 
 `rabbitmq_pool_ex` is an Elixir library that provides a robust and efficient connection pooling mechanism for RabbitMQ.
 It leverages `poolboy` to manage a pool of connections, ensuring high performance and reliability in message-driven applications.

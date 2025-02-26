@@ -35,8 +35,8 @@ defmodule RabbitMQPoolEx do
 
   `RabbitMQPoolEx` requires defining connection pools and RabbitMQ settings. The configuration consists of:
 
-  - :rabbitmq_config (keyword list) – General RabbitMQ connection parameters.
-  - :connection_pools (list) – A list of poolboy configurations, where each pool represents a connection to RabbitMQ.
+  - `:rabbitmq_config` (keyword list) – General RabbitMQ connection parameters.
+  - `:connection_pools` (list) – A list of poolboy configurations, where each pool represents a connection to RabbitMQ.
 
   Each pool configuration should include:
 
