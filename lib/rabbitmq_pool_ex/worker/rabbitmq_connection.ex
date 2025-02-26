@@ -426,12 +426,15 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   defp checkin_chanel(%State{reuse_channels?: true} = state, %{pid: pid} = channel) do
     %{channels: channels, monitors: monitors} = state
 
+    alive? = Process.alive?(pid)
+    not_checked_in? = channels |> find_channel(pid) |> is_nil()
+
     new_monitors = remove_monitor(monitors, pid)
 
-    if find_channel(channels, pid) do
-      %State{state | channels: channels, monitors: new_monitors}
-    else
+    if not_checked_in? and alive? do
       %State{state | channels: channels ++ [channel], monitors: new_monitors}
+    else
+      %State{state | channels: channels, monitors: new_monitors}
     end
   end
 
