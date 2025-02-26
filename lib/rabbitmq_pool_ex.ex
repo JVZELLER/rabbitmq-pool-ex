@@ -140,7 +140,7 @@ defmodule RabbitMQPoolEx do
   Retrieves a RabbitMQ connection from a connection worker within the pool.
 
   ## Parameters
-    - pool_id: Atom representing the pool identifier.
+    - `pool_id`: Atom representing the pool identifier.
   """
   @spec get_connection(atom()) :: {:ok, AMQP.Connection.t()} | {:error, :disconnected}
   def get_connection(pool_id) do
@@ -154,10 +154,7 @@ defmodule RabbitMQPoolEx do
   The pool configuration strategy is FIFO.
 
   ## Parameters
-    - pool_id: Atom representing the pool identifier.
-
-  ## Returns
-    - PID of the connection worker.
+    - `pool_id:` Atom representing the pool identifier.
   """
   @spec get_connection_worker(atom()) :: pid()
   def get_connection_worker(pool_id) do
@@ -178,8 +175,8 @@ defmodule RabbitMQPoolEx do
     4. Returns the channel to the worker's pool.
 
   ## Parameters
-    - pool_id: Atom representing the pool identifier.
-    - fun: Function to be executed within the channel's context.
+    - `pool_id`: Atom representing the pool identifier.
+    - `fun`: Function to be executed within the channel's context.
   """
   @spec with_channel(atom(), client_function()) :: any()
   def with_channel(pool_id, fun) do
@@ -192,7 +189,7 @@ defmodule RabbitMQPoolEx do
   Retrieves a RabbitMQ channel from the specified connection worker.
 
   ## Parameters
-    - conn_worker: PID of the connection worker.
+    - `conn_worker`: PID of the connection worker.
   """
   @spec checkout_channel(pid()) ::
           {:ok, AMQP.Channel.t()} | {:error, :disconnected | :out_of_channels}
@@ -204,8 +201,8 @@ defmodule RabbitMQPoolEx do
   Returns a RabbitMQ channel to its corresponding connection worker.
 
   ## Parameters
-    - conn_worker: PID of the connection worker.
-    - channel: The RabbitMQ channel to be returned.
+    - `conn_worker`: PID of the connection worker.
+    - `channel`: The RabbitMQ channel to be returned.
   """
   @spec checkin_channel(pid(), AMQP.Channel.t()) :: :ok
   def checkin_channel(conn_worker, channel) do
