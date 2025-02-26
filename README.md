@@ -43,7 +43,7 @@ defmodule MyApp.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      {RabbitMQPoolEx, get_pool_config()}
+      {RabbitMQPoolEx.PoolSupervisor, get_pool_config()}
     ]
 
     opts = [strategy: :one_for_one, name: MyApp.Supervisor]
@@ -54,13 +54,13 @@ defmodule MyApp.Application do
     [
       rabbitmq_config: [host: "localhost", port: 5672],
       connection_pools: [
-        %{
+        [
           name: {:local, :default_pool},
           size: 5,
           channels: 20,
           reuse_channels?: true,
           max_overflow: 2
-        }
+        ]
       ]
     ]
   end
