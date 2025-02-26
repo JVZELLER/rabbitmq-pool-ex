@@ -1,6 +1,6 @@
 defmodule RabbitMQPoolEx do
   @moduledoc """
-  RabbitMQPoolEx` is an Elixir library that provides a robust and efficient connection pooling mechanism for RabbitMQ.
+  `RabbitMQPoolEx` is an Elixir library that provides a robust and efficient connection pooling mechanism for RabbitMQ.
   It leverages `poolboy` to manage a pool of connections, ensuring high performance and reliability in message-driven
   applications.
 
@@ -40,12 +40,12 @@ defmodule RabbitMQPoolEx do
 
   Each pool configuration should include:
 
-  - :name (tuple) – A two element tuple containing the process registration scope and an unique name for the pool (e.g., {:local, :default_pool}).
-  - :worker_module (module) – Defaults to `RabbitMQPoolEx.Worker.RabbitMQConnection`, which manages pool connections and channels.
-  - :size (integer) – Number of connection processes in the pool.
-  - :channels (integer) – Number of channels managed within the pool.
-  - :reuse_channels? (boolean) – Defaults to `false`. Determines if channels should be reused instead of replaced after being used.
-  - :max_overflow (integer) – Maximum number of extra workers allowed beyond the initial pool size.
+  - `:name` (tuple) – A two element tuple containing the process registration scope and an unique name for the pool (e.g., {:local, :default_pool}).
+  - `:worker_module` (module) – Defaults to `RabbitMQPoolEx.Worker.RabbitMQConnection`, which manages pool connections and channels.
+  - `:size` (integer) – Number of connection processes in the pool.
+  - `:channels` (integer) – Number of channels managed within the pool.
+  - `:reuse_channels?` (boolean) – Defaults to `false`. Determines if channels should be reused instead of replaced after being used.
+  - `:max_overflow` (integer) – Maximum number of extra workers allowed beyond the initial pool size.
 
   ### Example Configuration:
 
@@ -58,7 +58,7 @@ defmodule RabbitMQPoolEx do
     @impl true
     def start(_type, _args) do
       children = [
-        {RabbitMQPoolEx.Application, get_pool_config()}
+        {RabbitMQPoolEx, get_pool_config()}
       ]
 
       opts = [strategy: :one_for_one, name: MyApp.Supervisor]
@@ -92,7 +92,7 @@ defmodule RabbitMQPoolEx do
       AMQP.Basic.publish(channel, "exchange_name", "routing_key", "Hello, World!")
       :ok
     {:error, reason} ->
-      IO.puts("Failed to acquire channel", error: reason)
+      IO.puts("Failed to acquire channel", error: inspect(reason))
   end)
   ```
 
@@ -102,7 +102,7 @@ defmodule RabbitMQPoolEx do
   For more advanced usage, such as setting up consumers or handling different exchange types, refer to the detailed
   documentation and examples provided in the library's repository.
 
-  ### Manually Retrieving a Connection
+  ### Manually retrieving a connection
 
   To manually retrieve a RabbitMQ connection from the pool:
 
@@ -110,7 +110,7 @@ defmodule RabbitMQPoolEx do
   {:ok, conn} = RabbitMQPoolEx.get_connection(:default_pool)
   ```
 
-  ### Manually Checking Out and Checking In a Channel
+  ### Manually checking out and checking in a channel
 
   ```elixir
   {:ok, channel} = RabbitMQPoolEx.checkout_channel(worker_pid)
@@ -130,7 +130,11 @@ defmodule RabbitMQPoolEx do
 
   alias RabbitMQPoolEx.Worker.RabbitMQConnection, as: Conn
 
-  @type f :: ({:ok, AMQP.Channel.t()} | {:error, :disconnected | :out_of_channels} -> any())
+  @typedoc """
+  The function to be used with `with_channel/2`
+  """
+  @type client_function ::
+          ({:ok, AMQP.Channel.t()} | {:error, :disconnected | :out_of_channels} -> any())
 
   @doc """
   Retrieves a RabbitMQ connection from a connection worker within the pool.
@@ -177,7 +181,7 @@ defmodule RabbitMQPoolEx do
     - pool_id: Atom representing the pool identifier.
     - fun: Function to be executed within the channel's context.
   """
-  @spec with_channel(atom(), f()) :: any()
+  @spec with_channel(atom(), client_function()) :: any()
   def with_channel(pool_id, fun) do
     pool_id
     |> get_connection_worker()
@@ -210,7 +214,7 @@ defmodule RabbitMQPoolEx do
 
   # Gets a channel out of a connection worker and performs a function with it
   # then it puts it back to the same connection worker, mimicking a transaction.
-  @spec do_with_conn(pid(), f()) :: any()
+  @spec do_with_conn(pid(), client_function()) :: any()
   defp do_with_conn(conn_worker, fun) do
     case checkout_channel(conn_worker) do
       {:ok, channel} = ok_chan ->

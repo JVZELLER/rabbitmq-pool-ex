@@ -1,9 +1,5 @@
 defmodule RabbitMQPoolEx.Application do
-  @moduledoc """
-  This module is responsible for supervising multiple connection pools for RabbitMQ connections.
-  It handles the dynamic creation of pools based on configuration and ensures the proper handling
-  of connection lifecycle events, providing robust management of connections and resources.
-  """
+  @moduledoc false
   use Application
 
   @impl true

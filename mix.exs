@@ -10,6 +10,7 @@ defmodule RabbitMQPoolEx.MixProject do
       version: version(),
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       dialyzer: [
         plt_add_deps: :apps_direct,
@@ -26,7 +27,34 @@ defmodule RabbitMQPoolEx.MixProject do
       package: package(),
 
       # Docs
-      name: @name
+      name: @name,
+      docs: docs()
+    ]
+  end
+
+  # Run "mix help compile.app" to learn about applications.
+  def application do
+    [
+      extra_applications: [:logger],
+      mod: {RabbitMQPoolEx.Application, []}
+    ]
+  end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  # Run "mix help deps" to learn about dependencies.
+  defp deps do
+    [
+      {:poolboy, "~> 1.5"},
+      {:amqp, "~> 4.0"},
+
+      # Docs
+      {:ex_doc, "~> 0.16", only: :dev, runtime: false},
+
+      # Testing and Dev Tools
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -45,23 +73,26 @@ defmodule RabbitMQPoolEx.MixProject do
     ]
   end
 
-  # Run "mix help compile.app" to learn about applications.
-  def application do
+  defp docs do
     [
-      extra_applications: [:logger],
-      mod: {RabbitMQPoolEx.Application, []}
-    ]
-  end
-
-  # Run "mix help deps" to learn about dependencies.
-  defp deps do
-    [
-      {:poolboy, "~> 1.5"},
-      {:amqp, "~> 4.0"},
-
-      # Testing and Dev Tools
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
+      source_url: @source_url,
+      main: "RabbitMQPoolEx",
+      source_ref: "v#{version()}",
+      groups_for_modules: [
+        Overview: [
+          RabbitMQPoolEx
+        ],
+        "RabbitMQ Adapters": [
+          RabbitMQPoolEx.Ports.RabbitMQ,
+          RabbitMQPoolEx.Adapters.RabbitMQ
+        ],
+        "Connection and Channel pools internals": [
+          RabbitMQPoolEx.Worker.RabbitMQConnection,
+          RabbitMQPoolEx.Worker.State
+        ]
+      ],
+      extra_section: "DOCS",
+      extras: ["CHANGELOG.md"]
     ]
   end
 end
