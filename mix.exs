@@ -47,7 +47,7 @@ defmodule RabbitMQPoolEx.MixProject do
   defp deps do
     [
       {:poolboy, "~> 1.5"},
-      {:amqp, "~> 4.0"},
+      {:amqp, "~> 3.0"},
 
       # Docs
       {:ex_doc, "~> 0.16", only: :dev, runtime: false},
