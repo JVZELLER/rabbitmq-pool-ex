@@ -35,7 +35,7 @@ defmodule RabbitMQPoolEx.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger, :runtime_tools]
     ]
   end
 
@@ -47,6 +47,11 @@ defmodule RabbitMQPoolEx.MixProject do
     [
       {:poolboy, "~> 1.5"},
       {:amqp, "~> 3.0"},
+
+      # Monitoring
+      {:telemetry, "~> 1.3.0"},
+      {:telemetry_metrics, "~> 1.1.0"},
+      {:telemetry_poller, "~> 1.1.0"},
 
       # Docs
       {:ex_doc, "~> 0.16", only: :dev, runtime: false},
