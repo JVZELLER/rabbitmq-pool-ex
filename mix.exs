@@ -93,6 +93,9 @@ defmodule RabbitMQPoolEx.MixProject do
         "Connection and Channel pools internals": [
           RabbitMQPoolEx.Worker.RabbitMQConnection,
           RabbitMQPoolEx.Worker.State
+        ],
+        "Telemetry Metrics": [
+          RabbitMQPoolEx.Telemetry.Metrics.PoolSize
         ]
       ],
       extra_section: "DOCS",

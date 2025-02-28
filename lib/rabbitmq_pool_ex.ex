@@ -12,6 +12,7 @@ defmodule RabbitMQPoolEx do
     processing.
   - **Channel Reuse**: Optionally reuse channels within a pool to optimize resource management.
   - **Configurable Pooling Strategy**: Customize the size, overflow, and behavior of connection pools.
+  - **Pool Metrics**: Built-in telemetry metrics for monitoring pools.
 
   ## Installation
 
@@ -122,6 +123,32 @@ defmodule RabbitMQPoolEx do
 
   In the example above, `checkout_channel/1` retrieves a RabbitMQ channel from the connection worker,
   and `checkin_channel/2` returns it to the pool when done.
+
+  ## Telemetry
+
+  > #### Metrics declaration {: .info}
+  >
+  > All metrics are defined in specific modules so you can use them like this: `RabbitMQPoolEx.Telemetry.Metrics.PoolSize.metrics()`
+  > in your telemetry supervisor.
+  >
+  > Check the **"Telemetry Metrics"** section in the sidebar for a list of all available modules.
+
+  `RabbitMQPoolEx` currently exposes following Telemetry events:
+
+    * `[:rabbitmq_pool_ex, :metrics, :pool_size]` - Dispatched whenever an operation increases or
+      decreases the pool size.
+
+      * Measurement: `%{count: integer}`
+      * Metadata:
+
+        ```elixir
+        %{
+          pool_id: atom,
+          channels_count: non_neg_integer,
+          reuse_channels: boolean,
+        }
+        ```
+        Check `RabbitMQPoolEx.Telemetry.Metrics.PoolSize` for more information.
 
   ## License
 

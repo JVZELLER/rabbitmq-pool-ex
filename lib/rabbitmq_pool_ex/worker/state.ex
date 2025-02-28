@@ -17,17 +17,23 @@ defmodule RabbitMQPoolEx.Worker.State do
 
   @enforce_keys [:config]
   @type t :: %__MODULE__{
+          pool_id: atom(),
           adapter: module(),
           connection: AMQP.Connection.t(),
           channels: list(AMQP.Channel.t()),
+          channels_count: non_neg_integer(),
+          pool_size: non_neg_integer(),
           monitors: %{},
           config: config(),
           reuse_channels?: boolean()
         }
 
-  defstruct adapter: RabbitMQ,
+  defstruct pool_id: nil,
+            adapter: RabbitMQ,
             connection: nil,
             channels: [],
+            channels_count: nil,
+            pool_size: nil,
             config: nil,
             monitors: %{},
             reuse_channels?: false

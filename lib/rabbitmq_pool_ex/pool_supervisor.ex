@@ -33,15 +33,18 @@ defmodule RabbitMQPoolEx.PoolSupervisor do
       {channels_config, poolboy_config} =
         Keyword.split(pool_config, ~w(channels reuse_channels?)a)
 
-      rabbitmq_config =
-        config |> Keyword.get(:rabbitmq_config, []) |> Keyword.merge(channels_config)
+      worker_config =
+        config
+        |> Keyword.get(:rabbitmq_config, [])
+        |> Keyword.merge(channels_config)
+        |> Keyword.put(:pool_id, pool_id)
 
       # We are using poolboy's pool as a fifo queue so we can distribute the
       # load between workers
       poolboy_config =
         Keyword.merge(poolboy_config, worker_module: RabbitMQConnection, strategy: :fifo)
 
-      :poolboy.child_spec(pool_id, poolboy_config, rabbitmq_config)
+      :poolboy.child_spec(pool_id, poolboy_config, worker_config)
     end
   end
 end

@@ -15,6 +15,7 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   use GenServer
 
   alias RabbitMQPoolEx.Adapters.RabbitMQ
+  alias RabbitMQPoolEx.Telemetry.Metrics.PoolSize
   alias RabbitMQPoolEx.Worker.State
 
   require Logger
@@ -138,12 +139,21 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
 
     {internal_opts, amqp_config} = Keyword.split(config, [:adapter])
 
+    pool_id = Keyword.get(amqp_config, :pool_id)
     adapter = Keyword.get(internal_opts, :adapter, RabbitMQ)
     reuse_channels? = Keyword.get(amqp_config, :reuse_channels?, false)
 
     send(self(), :connect)
 
-    {:ok, %State{config: amqp_config, reuse_channels?: reuse_channels?, adapter: adapter}}
+    state =
+      %State{
+        config: amqp_config,
+        reuse_channels?: reuse_channels?,
+        adapter: adapter,
+        pool_id: pool_id
+      }
+
+    {:ok, state}
   end
 
   @impl true
@@ -219,7 +229,9 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
 
     schedule_connect(config)
 
-    {:noreply, %State{state | connection: nil, channels: [], monitors: %{}}}
+    %State{state | connection: nil, channels: [], monitors: %{}, pool_size: 0}
+    |> tap(&PoolSize.execute/1)
+    |> then(&{:noreply, &1})
   end
 
   # Connection crashed so channels are going to crash too
@@ -242,42 +254,66 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
   @impl true
   def handle_info(
         {:EXIT, pid, reason},
-        %{channels: channels, connection: conn, monitors: monitors, adapter: adapter} = state
+        %{
+          channels: channels,
+          connection: conn,
+          monitors: monitors,
+          adapter: adapter,
+          pool_size: pool_size
+        } = state
       ) do
     Logger.warning("[RabbitMQPoolEx] Channel lost due to reason: #{inspect(reason)}")
     # don't start a new channel if crashed channel doesn't belongs to the pool
     # anymore, this can happen when a channel crashed or is closed when a client holds it
     # so we get an `:EXIT` message and a `:checkin_channel` message in no given
     # order
-    if find_channel(channels, pid, monitors) do
+    should_replace_and_checkin? =
+      channel_monitored?(pid, monitors) or channel_in_pool?(channels, pid)
+
+    should_replace_and_checkin?
+    |> if do
       new_channels = remove_channel(channels, pid)
       new_monitors = remove_monitor(monitors, pid)
 
       case start_channel(conn, adapter) do
         {:ok, channel} ->
           true = Process.link(channel.pid)
-          {:noreply, %State{state | channels: [channel | new_channels], monitors: new_monitors}}
+
+          %State{state | channels: [channel | new_channels], monitors: new_monitors}
 
         {:error, :closing} ->
           # RabbitMQ Connection is closed. nothing to do, wait for reconnections
-          {:noreply, %State{state | channels: new_channels, monitors: new_monitors}}
+          %State{
+            state
+            | channels: new_channels,
+              monitors: new_monitors,
+              pool_size: max(pool_size - 1, 0)
+          }
       end
     else
-      {:noreply, state}
+      state
     end
+    |> tap(&PoolSize.execute/1)
+    |> then(&{:noreply, &1})
   end
 
   # If client holding a channel fails, then we need to take its channel back
   @impl true
   def handle_info(
         {:DOWN, down_ref, :process, _process_pid, _reason},
-        %{channels: channels, monitors: monitors, connection: conn, adapter: adapter} = state
+        %{
+          channels: channels,
+          monitors: monitors,
+          connection: conn,
+          adapter: adapter,
+          pool_size: pool_size
+        } = state
       ) do
     monitors
     |> find_monitor(down_ref)
     |> case do
       nil ->
-        {:noreply, state}
+        state
 
       {pid, _ref} ->
         new_monitors = remove_monitor(monitors, pid)
@@ -287,13 +323,15 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
           {:ok, channel} ->
             true = Process.link(channel.pid)
 
-            {:noreply, %State{state | channels: [channel | channels], monitors: new_monitors}}
+            %State{state | channels: [channel | channels], monitors: new_monitors}
 
           {:error, :closing} ->
             # RabbitMQ Connection is closed. nothing to do, wait for reconnection
-            {:noreply, %State{state | channels: channels, monitors: new_monitors}}
+            %State{state | channels: channels, monitors: new_monitors, pool_size: pool_size - 1}
         end
     end
+    |> tap(&PoolSize.execute/1)
+    |> then(&{:noreply, &1})
   end
 
   @impl true
@@ -379,55 +417,85 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
         channel
       end)
 
-    Logger.info("[RabbitMQPoolEx] Successfully created #{num_channels} Channels")
-
-    %State{state | channels: channels}
+    %State{state | channels: channels, pool_size: num_channels, channels_count: num_channels}
+    |> tap(&Logger.info("[RabbitMQPoolEx] Successfully created #{&1.channels_count} Channels"))
+    |> tap(&PoolSize.execute/1)
   end
 
-  defp checkout_channel(%State{channels: [channel | rest], monitors: monitors} = state, from_pid) do
+  defp checkout_channel(
+         %State{channels: [channel | rest], monitors: monitors, pool_size: current_size} = state,
+         from_pid
+       ) do
     monitor_ref = Process.monitor(from_pid)
     new_monitors = Map.put_new(monitors, channel.pid, monitor_ref)
 
-    {channel, %State{state | channels: rest, monitors: new_monitors}}
+    %State{state | channels: rest, monitors: new_monitors, pool_size: current_size - 1}
+    |> tap(&PoolSize.execute/1)
+    |> then(&{channel, &1})
   end
 
-  defp checkin_chanel(%State{reuse_channels?: true} = state, %{pid: pid} = channel) do
+  defp checkin_chanel(
+         %State{reuse_channels?: true, pool_size: pool_size} = state,
+         %{pid: pid} = channel
+       ) do
     %{channels: channels, monitors: monitors} = state
 
     alive? = Process.alive?(pid)
-    not_checked_in? = channels |> find_channel(pid) |> is_nil()
+    not_checked_in? = not channel_in_pool?(channels, pid)
 
     new_monitors = remove_monitor(monitors, pid)
+    should_checkin? = alive? and not_checked_in?
 
-    if not_checked_in? and alive? do
-      %State{state | channels: channels ++ [channel], monitors: new_monitors}
+    should_checkin?
+    |> if do
+      %State{
+        state
+        | channels: [channel | channels],
+          monitors: new_monitors,
+          pool_size: pool_size + 1
+      }
     else
       %State{state | channels: channels, monitors: new_monitors}
     end
+    |> tap(&PoolSize.execute/1)
   end
 
-  defp checkin_chanel(%State{connection: conn, adapter: adapter} = state, %{pid: pid} = channel) do
+  defp checkin_chanel(
+         %State{connection: conn, adapter: adapter, pool_size: pool_size} = state,
+         %{pid: pid} = channel
+       ) do
     %{channels: channels, monitors: monitors} = state
 
     # Only start a new channel when checkin back a channel that isn't removed yet
     # this can happen when a channel crashed or is closed when a client holds it
     # so we get an `:EXIT` message and a `:checkin_channel` message in no given
     # order
-    if find_channel(channels, pid, monitors) do
+
+    should_replace_and_checkin? =
+      channel_in_pool?(channels, pid) or channel_monitored?(pid, monitors)
+
+    should_replace_and_checkin?
+    |> if do
       new_channels = remove_channel(channels, pid)
       new_monitors = remove_monitor(monitors, pid)
 
       case replace_channel(channel, conn, adapter) do
         {:ok, channel} ->
-          %State{state | channels: [channel | new_channels], monitors: new_monitors}
+          %State{
+            state
+            | channels: [channel | new_channels],
+              monitors: new_monitors,
+              pool_size: pool_size + 1
+          }
 
         {:error, :closing} ->
           # RabbitMQ Connection is closed. nothing to do, wait for reconnection
-          %State{state | channels: new_channels, monitors: new_monitors}
+          %State{state | channels: new_channels, monitors: new_monitors, pool_size: pool_size - 1}
       end
     else
       state
     end
+    |> tap(&PoolSize.execute/1)
   end
 
   # Schedules a reconnection attempt to RabbitMQ after a specified interval.
@@ -510,12 +578,12 @@ defmodule RabbitMQPoolEx.Worker.RabbitMQConnection do
     end
   end
 
-  defp find_channel(channels, channel_pid) do
-    Enum.find(channels, &(&1.pid == channel_pid))
+  defp channel_in_pool?(channels, channel_pid) do
+    (Enum.find(channels, &(&1.pid == channel_pid)) && true) || false
   end
 
-  defp find_channel(channels, channel_pid, monitors) do
-    Enum.find(channels, &(&1.pid == channel_pid)) || Map.get(monitors, channel_pid)
+  defp channel_monitored?(channel_pid, monitors) do
+    (Map.get(monitors, channel_pid) && true) || false
   end
 
   defp replace_channel(%AMQP.Channel{pid: pid} = channel, conn, adapter) do
