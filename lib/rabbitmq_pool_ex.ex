@@ -37,18 +37,62 @@ defmodule RabbitMQPoolEx do
   `RabbitMQPoolEx` requires defining connection pools and RabbitMQ settings. The configuration consists of:
 
   - `:rabbitmq_config` (keyword list) – General RabbitMQ connection parameters.
+    All `rabbitmq_config` options goes directly to RabbitMQ client (`AMQP`) to open the connection with the RabbitMQ broker.
+
   - `:connection_pools` (list) – A list of poolboy configurations, where each pool represents a connection to RabbitMQ.
 
   Each pool configuration should include:
 
-  - `:name` (tuple) – A two element tuple containing the process registration scope and an unique name for the pool (e.g., {:local, :default_pool}).
-  - `:worker_module` (module) – Defaults to `RabbitMQPoolEx.Worker.RabbitMQConnection`, which manages pool connections and channels.
-  - `:size` (integer) – Number of connection processes in the pool.
-  - `:channels` (integer) – Number of channels managed within the pool.
-  - `:reuse_channels?` (boolean) – Defaults to `false`. Determines if channels should be reused instead of replaced after being used.
-  - `:max_overflow` (integer) – Maximum number of extra workers allowed beyond the initial pool size.
+  - `:name` (tuple) – Required. A two element tuple containing the process registration scope and an unique name for the pool (e.g., {:local, :default_pool}).
+  - `:worker_module` (module) – Optional. Defaults to `RabbitMQPoolEx.Worker.RabbitMQConnection`, which manages pool connections and channels.
+  - `:size` (integer) – Required. Number of connection processes in the pool.
+  - `:channels` (integer) – Required. Number of channels managed within the pool.
+  - `:reuse_channels?` (boolean) – Optional. Defaults to `false`. Determines if channels should be reused instead of replaced after being used.
+  - `:max_overflow` (integer) – Required. Maximum number of extra connections allowed beyond the initial pool size.
 
-  ### Example Configuration:
+  ### Example Configuration
+
+  <!-- tabs-open -->
+
+  ### Basic configuration
+
+  To use `RabbitMQPoolEx`, add the following to your application's supervision tree:
+
+  ```elixir
+  defmodule MyApp.Application do
+    @moduledoc false
+
+    @impl true
+    def start(_type, _args) do
+      children = [
+        {RabbitMQPoolEx.PoolSupervisor, get_pool_config()}
+      ]
+
+      opts = [strategy: :one_for_one, name: MyApp.Supervisor]
+      Supervisor.start_link(children, opts)
+    end
+
+    defp get_pool_config do
+      pool_size = 10
+
+      [
+        rabbitmq_config: [host: "localhost", port: 5672],
+        connection_pools:
+          Enum.map(1..pool_size, fn n ->
+            [
+              name: {:local, String.to_atom("connection_pool_\#{n}")},
+              size: 5,
+              channels: 20,
+              reuse_channels?: true,
+              max_overflow: 2
+            ]
+          end)
+      ]
+    end
+  end
+  ```
+
+  ### Custom RabbitMQ connection opts
 
   To use `RabbitMQPoolEx`, add the following to your application's supervision tree:
 
@@ -68,10 +112,23 @@ defmodule RabbitMQPoolEx do
 
     defp get_pool_config do
       [
-        rabbitmq_config: [host: "localhost", port: 5672],
+        rabbitmq_config: [
+          host: "localhost",
+          port: 5672,
+          # Optional. Enables SSL.
+          # See `AMQP.Connection.open/2` for more information
+          ssl_options: [
+            verify: :verify_peer,
+            cacertfile: "/path/to/cacertfile",
+            depth: 3,
+            customize_hostname_check: [
+              match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+            ]
+          ]
+        ],
         connection_pools: [
           [
-            name: {:local, :default_pool},
+            name: {:local, :ssl_pool},
             size: 5,
             channels: 20,
             reuse_channels?: true,
@@ -81,6 +138,45 @@ defmodule RabbitMQPoolEx do
       ]
     end
   end
+  ```
+
+  <!-- tabs-close -->
+
+  ### Visual representation
+
+  Given a configuration with two pools, where each pool has:
+  - `size: 2` - two connections per pool
+  - `channels: 2` - each connection manages two channels
+
+  The resulting topology would be as follows::
+  ```mermaid
+  graph TD
+    pool_1@{ shape: dbl-circ, label: "connection_pool_1" }
+    pool_2@{ shape: dbl-circ, label: "connection_pool_2" }
+
+    conn_1_pool_1@{ shape: circle, label: "Connection n 1" }
+    conn_2_pool_1@{ shape: circle, label: "Connection n 2" }
+    conn_1_pool_2@{ shape: circle, label: "Connection n 1" }
+    conn_2_pool_2@{ shape: circle, label: "Connection n 2" }
+
+    pool_1_conn_1_channel_1@{ shape: circle, label: "Channel n 1" }
+    pool_1_conn_1_channel_2@{ shape: circle, label: "Channel n 2" }
+    pool_1_conn_2_channel_1@{ shape: circle, label: "Channel n 1" }
+    pool_1_conn_2_channel_2@{ shape: circle, label: "Channel n 2" }
+
+    pool_2_conn_1_channel_1@{ shape: circle, label: "Channel n 1" }
+    pool_2_conn_1_channel_2@{ shape: circle, label: "Channel n 2" }
+    pool_2_conn_2_channel_1@{ shape: circle, label: "Channel n 1" }
+    pool_2_conn_2_channel_2@{ shape: circle, label: "Channel n 2" }
+
+    pool_1 --- conn_1_pool_1 & conn_2_pool_1;
+    pool_2 --- conn_1_pool_2 & conn_2_pool_2;
+
+    conn_1_pool_1 --> pool_1_conn_1_channel_1 & pool_1_conn_1_channel_2;
+    conn_2_pool_1 --> pool_1_conn_2_channel_1 & pool_1_conn_2_channel_2;
+
+    conn_1_pool_2 --> pool_2_conn_1_channel_1 & pool_2_conn_1_channel_2;
+    conn_2_pool_2 --> pool_2_conn_2_channel_1 & pool_2_conn_2_channel_2;
   ```
 
   ## Usage
@@ -160,6 +256,7 @@ defmodule RabbitMQPoolEx do
   @typedoc """
   The function to be used with `with_channel/2`
   """
+
   @type client_function ::
           ({:ok, AMQP.Channel.t()} | {:error, :disconnected | :out_of_channels} -> any())
 
